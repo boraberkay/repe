@@ -201,12 +201,18 @@ async function api(method, payload) {
     const j = await r.json(); if (!j.ok) throw new Error(j.error || 'error'); return j;
   }
   const r = await fetch(cfg.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ...payload, token: cfg.token }) });
-  const j = await r.json(); if (!j.ok) throw new Error(j.error || 'error'); return j;
+  const j = await r.json();
+  if (!j.ok) { const e = new Error(j.error || 'error'); e.server = true; throw e; }
+  return j;
 }
 async function refresh(silent) {
   try {
     const j = await api('GET');
     data = { program: j.program, history: j.history, sessions: j.sessions };
+    LS.get('queue', []).filter(x => x.action === 'deleteDay').forEach(x => {
+      Object.keys(data.history).forEach(k => { data.history[k] = data.history[k].filter(h => h.date !== x.date); });
+      data.sessions = data.sessions.filter(h => h.date !== x.date);
+    });
     LS.set('data', data);
     if (!silent) render();
     else if (ui.screen === 'today' || ui.screen === 'progress' || ui.screen === 'program') render();
@@ -216,13 +222,29 @@ async function flushQueue() {
   const q = LS.get('queue', []);
   if (!q.length) return;
   const left = [];
-  for (const item of q) { try { await api('POST', item); } catch (e) { left.push(item); } }
+  for (const item of q) {
+    try { await api('POST', item); }
+    catch (e) {
+      if (e.server && e.message === 'unknown action') { toast('Update Code.gs in Apps Script (new version) to sync'); left.push(item); }
+      else if (e.server) { toast('Sheet refused: ' + e.message); }
+      else left.push(item);
+    }
+  }
   LS.set('queue', left);
   if (left.length < q.length) { toast('Synced to Google Sheet'); refresh(true); }
 }
 async function post(payload) {
   try { await api('POST', payload); return true; }
-  catch (e) { const q = LS.get('queue', []); q.push(payload); LS.set('queue', q); return false; }
+  catch (e) {
+    if (e.server && e.message === 'unknown action') toast('Update Code.gs in Apps Script (new version)');
+    else if (e.server) { toast('Sheet refused: ' + e.message); return false; }
+    const q = LS.get('queue', []);
+    // a newer save/delete for the same day replaces older queued ones
+    const key = x => x.action === 'saveVideo' ? 'v|' + x.exercise : 'd|' + x.date + '|' + (x.action === 'deleteDay' ? '' : x.day);
+    const k = key(payload);
+    const keep = q.filter(x => key(x) !== k && !(payload.action === 'deleteDay' && x.date === payload.date && x.action !== 'saveVideo'));
+    keep.push(payload); LS.set('queue', keep); return false;
+  }
 }
 
 // ---------- demo backend (try without Google) ----------
@@ -362,7 +384,7 @@ function vToday() {
       <div class="stat"><div class="cond">${last.minutes}<span style="font-size:16px"> min</span></div><div class="lbl muted">Time</div></div>
       <div class="stat"><div class="cond">${last.sets}</div><div class="lbl muted">Sets</div></div>
       <div class="stat"><div class="cond">${esc(last.day)}</div><div class="lbl muted">${esc(dayTitle(last.day))}</div></div></div></div></div>` : ''}
-  ${LS.get('queue', []).length ? `<div class="pad" style="padding-top:14px"><button class="btn btn-out" style="height:48px" data-act="sync"><span class="lbl">${LS.get('queue', []).length} workout waiting to sync · tap to retry</span></button></div>` : ''}
+  ${LS.get('queue', []).length ? `<div class="pad" style="padding-top:14px"><button class="btn btn-out" style="height:48px" data-act="sync"><span class="lbl">${LS.get('queue', []).length} change(s) waiting to sync · tap to retry</span></button></div>` : ''}
   ${tabs('today')}</div>`;
 }
 
