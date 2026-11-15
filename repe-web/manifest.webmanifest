@@ -1,0 +1,16 @@
+{
+  "name": "Repe",
+  "short_name": "Repe",
+  "description": "Cuenta cada repe. Log your sets straight into your Google Sheet.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#E8213A",
+  "theme_color": "#E8213A",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
