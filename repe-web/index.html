@@ -40,6 +40,16 @@ a{color:inherit}
 .btn-out{background:transparent;border:1.5px solid var(--line)}
 .btn .cond{font-size:22px;letter-spacing:.02em}
 .pill{height:44px;padding:0 16px;border-radius:999px;border:0;display:flex;align-items:center}
+.sec{margin:12px 16px 0;background:#F4F4F5;border-radius:20px;padding:14px 16px 16px}
+.sec .round{background:#fff;border:0;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.sec .reps{background:#fff}
+.sec-h{font-size:13px;font-weight:900;letter-spacing:.12em;text-transform:uppercase}
+.hbtn{width:32px;height:32px;border-radius:999px;border:1.5px solid rgba(255,255,255,.7);background:transparent;color:#fff;font-size:18px;line-height:1;padding:0}
+.hbtn:disabled{opacity:.35}
+.chipbtn{height:40px;padding:0 12px;border-radius:999px;border:1.5px solid var(--line);background:#fff;display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;text-decoration:none;color:var(--ink)}
+.actionbar{position:sticky;bottom:0;margin-top:auto;background:#fff;border-top:1px solid var(--line);padding:12px 16px calc(var(--bot) + 14px);z-index:5}
+.actionbar .btn{gap:10px}
+.round:disabled{opacity:.3}
 .round{width:56px;height:56px;border-radius:999px;border:1.5px solid var(--line);background:#fff;font-size:26px;font-weight:500;flex:none}
 .tabs{margin-top:auto;border-top:1px solid var(--line);padding:10px 28px calc(var(--bot) + 14px);display:flex;justify-content:space-between;background:#fff;position:sticky;bottom:0}
 .tab{width:80px;display:flex;flex-direction:column;align-items:center;gap:6px;color:#8A8A8A;background:none;border:0;font-size:10px}
@@ -57,13 +67,16 @@ a{color:inherit}
 .tally .b.now{background:transparent;border:2px solid #fff;animation:pulse 1.4s ease-in-out infinite}
 .tally .b.x{background:#fff;opacity:.75}
 .tally .n{font-size:13px;font-weight:800;text-align:center;padding-top:6px}
+@keyframes fill{from{width:0}to{width:100%}}
 @keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
 @keyframes grow{from{transform:scaleY(0)}to{transform:scaleY(1)}}
 @keyframes strike{from{stroke-dashoffset:640}to{stroke-dashoffset:0}}
 @keyframes up{from{transform:translateY(18px);opacity:0}to{transform:none;opacity:1}}
 .grow{transform-origin:bottom;animation:grow .35s ease-out both}
-.reps{display:grid;border:1.5px solid var(--ink);border-radius:14px;overflow:hidden}
-.reps button{height:54px;border:0;border-right:1.5px solid var(--ink);background:#fff;font-size:26px}
+.reps{display:flex;position:relative;border:1.5px solid var(--ink);border-radius:14px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.reps::-webkit-scrollbar{display:none}
+.reps button{flex:0 0 20%;height:54px;border:0;border-right:1.5px solid var(--ink);background:#fff;font-size:26px;scroll-snap-align:start}
+.reps button.in:not(.on){background:#F2F2F3}
 .reps button:last-child{border-right:0}
 .reps button.on{background:var(--ink);color:#fff}
 .seg{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:3px}
@@ -245,6 +258,10 @@ function demoApi(method, payload) {
     payload.sets.forEach(s => db.log.push({ ...s, date: payload.date, day: payload.day, ts }));
     db.sessions.push({ date: payload.date, day: payload.day, minutes: Math.max(1, Math.round((payload.endTs - payload.startTs) / 60000)), sets: payload.sets.length, ts });
   }
+  if (payload.action === 'deleteDay') {
+    db.log = db.log.filter(r => !(r.date === payload.date && (!payload.day || r.day === payload.day)));
+    db.sessions = db.sessions.filter(r => !(r.date === payload.date && (!payload.day || r.day === payload.day)));
+  }
   if (payload.action === 'saveVideo') db.program.forEach(p => { if (p.exercise === payload.exercise) p.video = payload.url; });
   LS.set('demo', db);
   return Promise.resolve({ ok: true });
@@ -270,7 +287,12 @@ function strikeSet() {
   wk.restStart = Date.now(); wk.restDur = p.rest || 90;
   saveWk();
   if (navigator.vibrate) navigator.vibrate(30);
-  if (sets.length >= target(p)) { ui.screen = 'well'; }
+  if (sets.length >= target(p)) {
+    ui.screen = 'well';
+    const idx = wk.idx, hasNext = wk.idx < wkList().length - 1;
+    clearTimeout(ui.auto);
+    if (hasNext) ui.auto = setTimeout(() => { if (ui.screen === 'well' && wk && wk.idx === idx) nextExercise(); }, 4000);
+  }
   render();
 }
 function nextExercise() {
@@ -356,65 +378,71 @@ function vLog() {
     if (i === sets.length) return `<div><div class="b now"></div><div class="n" style="opacity:.8">—</div></div>`;
     return `<div><div class="b todo"></div><div class="n" style="opacity:.5">&nbsp;</div></div>`;
   }).join('');
-  const lo = Math.max(1, p.repLow - 2), hi = p.repHigh + 2;
-  let chips = []; for (let r = lo; r <= hi; r++) chips.push(r);
-  if (chips.length > 7) { const mid = Math.min(Math.max(reps, lo + 3), hi - 3); chips = [mid - 3, mid - 2, mid - 1, mid, mid + 1, mid + 2, mid + 3]; }
-  if (!chips.includes(reps)) { chips.push(reps); chips.sort((a, b) => a - b); }
+  // fixed strip 6–20 (wider if the program needs it); scrolls to the target
+  const lo = Math.min(6, reps), hi = Math.max(20, p.repHigh, reps);
+  const chips = []; for (let r = lo; r <= hi; r++) chips.push(r);
   const st = p.type === 'body' ? null : strength(p, kg);
   const seg = st ? Array.from({ length: 12 }, (_, i) => `<i class="${i + 1 < st.level ? 'f' : i + 1 === st.level ? 'c' : ''}"></i>`).join('') : '';
   const next = list[wk.idx + 1];
   const vid = p.video || ('https://www.youtube.com/results?search_query=' + encodeURIComponent(p.exercise.replace(/\bDB\b/, 'dumbbell') + ' proper form shorts'));
-  const restLeft = wk.restStart ? wk.restDur - (Date.now() - wk.restStart) / 1000 : null;
   const unit = p.type === 'assist' ? 'kg assist' : 'kg';
+  const strikeBtn = sets.length >= tgt
+    ? `<button class="btn btn-red" data-act="next"><span class="cond">${next ? 'Next exercise ›' : 'Finish workout'}</span></button>`
+    : `<button class="btn btn-red" data-act="strike">${mark('#FFFFFF', null, 26, 21)}<span class="cond">${sets.length + 1 === tgt ? (next ? 'Strike & next' : 'Strike last set') : sets.length >= p.sets ? 'Strike extra set' : 'Strike set ' + (sets.length + 1)}</span><span class="cond" style="opacity:.75;font-size:18px">${p.type === 'body' ? reps + ' reps' : fmtKg(kg) + ' × ' + reps}</span></button>`;
   return `<div class="screen">
-  <div class="hero" style="padding-bottom:22px">${ghost()}
+  <div class="hero" style="padding-bottom:20px">${ghost()}
     <div class="row" style="gap:14px">
       <button data-go="today" aria-label="Back" style="background:none;border:0;color:#fff;margin-left:-10px;width:40px;height:40px">${ICON.back}</button>
       <button class="lbl" data-act="list" style="flex:1;text-align:left;background:none;border:0;color:#fff;opacity:.9;padding:0">${wk.day} · Exercise ${wk.idx + 1} of ${list.length} ▾</button>
       <div style="text-align:right"><div class="lbl" style="font-size:9px;opacity:.75">Workout</div><div style="font-size:17px;font-weight:800" id="t-work">${mmss((Date.now() - wk.startTs) / 1000)}</div></div>
-      <div style="text-align:right"><div class="lbl" style="font-size:9px;opacity:.75">Rest</div><div style="font-size:17px;font-weight:800" id="t-rest">${restLeft == null ? '—' : restLeft > 0 ? mmss(restLeft) : 'GO'}</div></div>
     </div>
-    <div class="cond" style="padding-top:20px;font-size:${p.exercise.length > 18 ? 44 : 52}px;line-height:.9">${esc(p.exercise)}</div>
+    <div class="cond" style="padding-top:18px;font-size:${p.exercise.length > 18 ? 44 : 52}px;line-height:.9">${esc(p.exercise)}</div>
     <div class="lbl" style="padding-top:10px;opacity:.85">${p.sets} sets · ${p.repLow === p.repHigh ? p.repLow : p.repLow + '–' + p.repHigh} reps${p.note ? ' · ' + esc(p.note) : ''}</div>
-    <div class="row between" style="padding-top:20px;align-items:flex-end">
+    <div class="row between" style="padding-top:18px;align-items:flex-end">
       <div class="tally">${bars}</div>
-      <div style="text-align:right"><div class="cond" style="font-size:64px;line-height:.85">${sets.length}<span style="opacity:.4">/${tgt}</span></div>
-      ${sets.length ? `<button data-act="undo" class="lbl" style="background:none;border:0;color:#fff;opacity:.85;padding:6px 0 0">Undo last</button>` : ''}</div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+        <div class="cond" style="font-size:56px;line-height:.85">${sets.length}<span style="opacity:.4">/${tgt}</span></div>
+        <div class="row" style="gap:8px">
+          <button class="hbtn" data-act="lessset" aria-label="Remove a set" ${tgt <= Math.max(1, sets.length) ? 'disabled' : ''}>−</button>
+          <span class="lbl" style="font-size:10px;opacity:.9">Sets</span>
+          <button class="hbtn" data-act="extra" aria-label="Add a set">+</button>
+        </div>
+      </div>
     </div>
+    ${sets.length ? `<button data-act="undo" class="lbl" style="background:none;border:0;color:#fff;opacity:.85;padding:10px 0 0">↺ Undo last set</button>` : ''}
   </div>
 
-  ${p.type === 'body' ? '' : `<div class="pad" style="padding-top:20px">
-    <div class="row between"><span class="lbl muted">${p.type === 'assist' ? 'Counterweight' : 'Weight'}</span><span class="lbl muted">Last: ${esc(lastTxt)}</span></div>
-    <div class="row between" style="padding-top:12px">
+  ${p.type === 'body' ? '' : `<section class="sec">
+    <div class="row between"><span class="sec-h">${p.type === 'assist' ? 'Counterweight' : 'Weight'}</span><span class="lbl muted">Last: ${esc(lastTxt)}</span></div>
+    <div class="row between" style="padding-top:10px">
       <button class="round" data-act="kg" data-dir="-1" aria-label="Less">−</button>
-      <button data-act="kgpick" style="background:none;border:0;padding:0"><span class="cond" style="font-size:88px;line-height:.85">${fmtKg(kg)}</span><span class="cond muted" style="font-size:24px"> ${unit}</span></button>
+      <button data-act="kgpick" style="background:none;border:0;padding:0"><span class="cond" style="font-size:80px;line-height:.85">${fmtKg(kg)}</span><span class="cond muted" style="font-size:22px"> ${unit}</span></button>
       <button class="round" data-act="kg" data-dir="1" aria-label="More">+</button>
     </div>
     ${sug.up && !sets.length ? `<div class="lbl" style="color:var(--red);text-align:center;padding-top:8px">↑ Move up today</div>` : sug.first && !sets.length ? `<div class="lbl muted" style="text-align:center;padding-top:8px">Find your weight · 1–2 reps in reserve</div>` : ''}
     ${st ? `<div class="seg" style="margin-top:14px">${seg}</div><div class="row between" style="padding-top:8px"><span class="lbl muted">Start ${fmtKg(st.start)}</span><span class="lbl" style="color:var(--red)">Level ${st.level}</span><span class="lbl muted">Best ${fmtKg(st.best)}</span></div>` : ''}
-  </div>`}
+  </section>`}
 
-  <div class="pad" style="padding-top:18px">
-    <div class="lbl muted" style="padding-bottom:10px">Reps</div>
-    <div class="reps" style="grid-template-columns:repeat(${chips.length},minmax(0,1fr))">${chips.map(r => `<button class="cond ${r === reps ? 'on' : ''}" data-act="reps" data-r="${r}">${r}</button>`).join('')}</div>
+  <section class="sec">
+    <div class="row between" style="padding-bottom:10px"><span class="sec-h">Reps</span><span class="lbl muted">Target ${p.repLow === p.repHigh ? p.repLow : p.repLow + '–' + p.repHigh}</span></div>
+    <div class="reps" id="reps">${chips.map(r => `<button class="cond ${r === reps ? 'on' : ''} ${r >= p.repLow && r <= p.repHigh ? 'in' : ''}" data-act="reps" data-r="${r}">${r}</button>`).join('')}</div>
+  </section>
+
+  <section class="pad row" style="gap:8px;padding-top:14px">
+    <span class="lbl muted" style="flex:1">Form</span>
+    <a class="chipbtn" href="${esc(vid)}" target="_blank" rel="noopener"><span style="width:22px;height:22px;border-radius:999px;background:var(--red);display:flex;align-items:center;justify-content:center">${ICON.play}</span>${p.video ? 'Your video' : 'Watch how'}</a>
+    <button class="chipbtn" data-act="video">${ICON.plus}${p.video ? 'Change video' : 'Save video'}</button>
+  </section>
+
+  <div class="actionbar">
+    ${strikeBtn}
+    <div class="row" style="gap:10px;padding-top:10px">
+      <button data-act="skip" style="flex:1;min-width:0;text-align:left;background:none;border:0;padding:0">
+        <div class="lbl muted" style="font-size:10px">${next ? 'Next' : 'Last exercise'}</div>
+        <div style="font-size:14px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${next ? esc(next.exercise) + ' ›' : 'Then finish'}</div></button>
+      <button class="lbl" data-act="finish" style="height:40px;padding:0 14px;border-radius:999px;border:1.5px solid var(--ink);background:#fff">Finish workout</button>
+    </div>
   </div>
-
-  <div class="pad row" style="padding-top:14px;gap:10px">
-    <button class="btn btn-red" data-act="strike" style="flex:1">${mark('#FFFFFF', null, 26, 21)}<span class="cond">${sets.length >= p.sets ? 'Strike extra set' : 'Strike set ' + (sets.length + 1)}</span></button>
-    <button class="btn btn-out" data-act="extra" aria-label="Add extra set" style="width:60px;flex:none;font-size:26px">+</button>
-  </div>
-
-  <div class="pad row between" style="padding-top:12px">
-    <a class="row" style="gap:10px;text-decoration:none;height:48px" href="${esc(vid)}" target="_blank" rel="noopener"><span style="width:32px;height:32px;border-radius:999px;background:var(--ink);display:flex;align-items:center;justify-content:center">${ICON.play}</span><span class="lbl">${p.video ? 'Your video' : 'Watch how'}</span></a>
-    <button class="row" data-act="video" style="gap:10px;height:48px;background:none;border:0;padding:0"><span class="lbl">${p.video ? 'Change video' : 'Save video'}</span><span style="width:32px;height:32px;border-radius:999px;border:1.5px solid var(--ink);display:flex;align-items:center;justify-content:center">${ICON.plus}</span></button>
-  </div>
-
-  <div class="pad" style="margin-top:auto"><div class="row" style="gap:10px;padding:14px 0 calc(var(--bot) + 18px);border-top:1px solid var(--line)">
-    <button data-act="skip" style="flex:1;min-width:0;text-align:left;background:none;border:0;padding:0">
-      <div class="lbl muted" style="font-size:10px">${next ? 'Next' : 'Last exercise'}</div>
-      <div style="font-size:15px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${next ? esc(next.exercise) + ' ›' : 'Then finish'}</div></button>
-    <button class="pill btn-ink lbl" data-act="finish">Finish workout</button>
-  </div></div>
   </div>`;
 }
 
@@ -441,7 +469,7 @@ function vWell() {
   </div></div>
   <div class="pad" style="margin-top:auto;padding-bottom:calc(var(--bot) + 20px)">
     <div class="row between" style="padding-bottom:12px"><span class="lbl" style="font-size:10px;opacity:.8">${next ? 'Up next' : 'Workout'}</span><span style="font-size:15px;font-weight:800">${next ? esc(next.exercise) + ' · ' + next.sets + ' × ' + (next.repLow === next.repHigh ? next.repLow : next.repLow + '–' + next.repHigh) : 'All exercises done'}</span></div>
-    <button class="btn btn-white" data-act="${next ? 'next' : 'finish'}"><span class="cond">${next ? 'Next exercise' : 'Finish workout'}</span></button>
+    <button class="btn btn-white" data-act="${next ? 'next' : 'finish'}" style="position:relative;overflow:hidden">${next ? '<i style="position:absolute;left:0;top:0;bottom:0;background:rgba(232,33,58,.12);animation:fill 4s linear both"></i>' : ''}<span class="cond" style="position:relative">${next ? 'Next exercise' : 'Finish workout'}</span></button>
     <button class="btn" data-act="more" style="height:44px;background:none;color:#fff"><span class="lbl">One more set</span></button>
   </div></div>`;
 }
@@ -529,8 +557,39 @@ function vSettings() {
     <input class="f" id="s-token" placeholder="the TOKEN from Code.gs" value="${esc(cfg && cfg.url !== 'demo' ? cfg.token : '')}" autocomplete="off" autocapitalize="off">
     <button class="btn btn-red" data-act="savecfg" style="margin-top:6px"><span class="cond">Connect</span></button>
     <button class="btn btn-out" data-act="demo" style="height:50px"><span class="lbl">Try the demo first</span></button>
-    ${cfg ? `<button class="btn" data-go="today" style="height:44px;background:none"><span class="lbl muted">Cancel</span></button>` : ''}
-  </div></div>`;
+    ${cfg ? `<button class="btn" data-go="today" style="height:44px;background:none"><span class="lbl muted">Back</span></button>` : ''}
+  </div>
+  ${cfg ? vData() : ''}
+  </div>`;
+}
+
+function vData() {
+  const iso = d => { const [a, b, c] = d.split('-'); return c + '-' + b + '-' + a; };
+  const days = {};
+  data.sessions.forEach(x => { (days[x.date] = days[x.date] || []).push(x.day); });
+  Object.values(data.history).forEach(arr => arr.forEach(x => { days[x.date] = days[x.date] || []; if (!days[x.date].includes(x.day)) days[x.date].push(x.day); }));
+  const dates = Object.keys(days).sort((a, b) => parseD(b) - parseD(a)).slice(0, 20);
+  return `<div class="pad" style="padding-top:28px;padding-bottom:calc(var(--bot) + 30px)">
+    <div style="border-top:1px solid var(--line);padding-top:18px">
+      <div class="cond" style="font-size:30px;line-height:1">Logged days</div>
+      <div class="lbl muted" style="padding-top:6px">${cfg.url === 'demo' ? 'Demo data · only on this phone' : 'Deleting removes the rows from your Google Sheet'}</div>
+      <div class="row" style="gap:8px;padding-top:14px">
+        <input class="f" type="date" id="del-date" value="${iso(todayStr())}" style="flex:1">
+        <button class="pill lbl" data-act="delpick" style="background:var(--ink);color:#fff;height:50px">Delete day</button>
+      </div>
+      <div style="padding-top:10px">${dates.length ? dates.map(d => `<div class="list-row"><span><span style="font-size:15px;font-weight:700">${esc(d)}</span> <span class="lbl muted">${esc(days[d].join(' · '))}</span></span><button class="lbl" data-act="delday" data-date="${esc(d)}" style="background:none;border:0;color:var(--red);padding:8px 0 8px 12px">Delete</button></div>`).join('') : '<div class="lbl muted" style="padding:14px 0">Nothing logged yet</div>'}</div>
+      ${cfg.url === 'demo' ? `<button class="btn btn-out" data-act="resetdemo" style="height:48px;margin-top:14px"><span class="lbl">Reset demo data</span></button>` : ''}
+    </div></div>`;
+}
+
+async function deleteDay(date) {
+  if (!confirm('Delete everything logged on ' + date + '? This cannot be undone.')) return;
+  Object.keys(data.history).forEach(k => { data.history[k] = data.history[k].filter(x => x.date !== date); });
+  data.sessions = data.sessions.filter(x => x.date !== date);
+  LS.set('data', data); render();
+  const ok = await post({ action: 'deleteDay', date });
+  toast(ok ? date + ' deleted' : 'Deleted on phone · sheet will update when online');
+  if (ok) refresh(true);
 }
 
 function sheetHtml() {
@@ -566,6 +625,8 @@ function render() {
   if (ui.screen === 'log' && !wk) ui.screen = 'today';
   $('#app').innerHTML = (ui.screen === 'log' && !wk ? vToday() : v()) + sheetHtml();
   document.body.style.background = ui.screen === 'well' ? '#E8213A' : ui.screen === 'saved' ? '#0B0B0C' : '#FFFFFF';
+  const rs = document.getElementById('reps');
+  if (rs) { const on = rs.querySelector('.on'); if (on) rs.scrollLeft = on.offsetLeft - rs.clientWidth / 2 + on.offsetWidth / 2; }
   if (ui.sheet === 'kgpick') { const on = document.querySelector('.sheet [data-kg][style*="var(--ink)"]'); if (on) on.scrollIntoView({ block: 'center' }); }
 }
 
@@ -588,12 +649,17 @@ document.addEventListener('click', async e => {
     case 'kg': wk.kg[p.exercise] = stepKg(p.type, curKg(p), Number(a.dataset.dir)); saveWk(); render(); break;
     case 'kgpick': ui.sheet = 'kgpick'; render(); break;
     case 'setkg': wk.kg[p.exercise] = Number(a.dataset.kg); ui.sheet = null; saveWk(); render(); break;
-    case 'reps': wk.reps[p.exercise] = Number(a.dataset.r); saveWk(); render(); break;
+    case 'reps': {
+      wk.reps[p.exercise] = Number(a.dataset.r); saveWk();
+      document.querySelectorAll('#reps button').forEach(b => b.classList.toggle('on', b === a));
+      break;
+    }
     case 'strike': strikeSet(); window.scrollTo(0, 0); break;
-    case 'extra': wk.target[p.exercise] = Math.max(target(p), doneSets(p).length) + 1; saveWk(); toast('Extra set added'); render(); break;
-    case 'more': wk.target[p.exercise] = doneSets(p).length + 1; ui.screen = 'log'; saveWk(); render(); break;
+    case 'extra': wk.target[p.exercise] = Math.max(target(p), doneSets(p).length) + 1; saveWk(); render(); break;
+    case 'lessset': wk.target[p.exercise] = Math.max(1, doneSets(p).length, target(p) - 1); saveWk(); render(); break;
+    case 'more': clearTimeout(ui.auto); wk.target[p.exercise] = doneSets(p).length + 1; ui.screen = 'log'; saveWk(); render(); break;
     case 'undo': doneSets(p).pop(); saveWk(); render(); break;
-    case 'next': nextExercise(); window.scrollTo(0, 0); break;
+    case 'next': clearTimeout(ui.auto); nextExercise(); window.scrollTo(0, 0); break;
     case 'skip': if (wk.idx < wkList().length - 1) { wk.idx++; saveWk(); render(); } break;
     case 'list': ui.sheet = 'list'; render(); break;
     case 'goto': wk.idx = Number(a.dataset.i); ui.sheet = null; ui.screen = 'log'; saveWk(); render(); break;
@@ -612,16 +678,22 @@ document.addEventListener('click', async e => {
     case 'pickex': ui.sheet = 'pickex'; render(); break;
     case 'setex': ui.progEx = a.dataset.ex; ui.sheet = null; render(); break;
     case 'savecfg': {
-      const url = $('#s-url').value.trim(), token = $('#s-token').value.trim();
-      if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(url)) { toast('URL must end with /exec'); return; }
+      const raw = $('#s-url').value, token = $('#s-token').value.replace(/[\s\u200B-\u200D\uFEFF]/g, '');
+      const m = raw.match(/https:\/\/script\.google\.com\/[^\s?#]*?\/(exec|dev)\b/);
+      if (!m) { toast('Paste the Web app URL from Deploy › Manage deployments'); return; }
+      if (m[1] === 'dev') { toast('That is the test URL · use the one ending in /exec'); return; }
+      const url = m[0];
       if (!token) { toast('Add your token'); return; }
       cfg = { url, token }; LS.set('cfg', cfg);
       try { const j = await api('GET'); data = { program: j.program, history: j.history, sessions: j.sessions }; LS.set('data', data); ui.screen = 'today'; render(); toast('Connected'); }
-      catch (err) { toast('Could not connect: ' + err.message); }
+      catch (err) { toast(/token/.test(err.message) ? 'Wrong token · check TOKEN in Code.gs' : 'No access · set Who has access to Anyone'); }
       break;
     }
     case 'demo': cfg = { url: 'demo', token: '' }; LS.set('cfg', cfg); await refresh(); ui.screen = 'today'; render(); toast('Demo mode · nothing goes to Google'); break;
     case 'refresh': refresh(); break;
+    case 'delday': deleteDay(a.dataset.date); break;
+    case 'delpick': { const v = $('#del-date').value; if (!v) return; const [y, m, d] = v.split('-'); deleteDay(d + '-' + m + '-' + y); break; }
+    case 'resetdemo': if (confirm('Reset all demo data?')) { LS.del('demo'); await refresh(); toast('Demo reset'); } break;
     case 'sync': flushQueue().then(render); break;
   }
 });
@@ -630,8 +702,6 @@ document.addEventListener('click', async e => {
 setInterval(() => {
   if (!wk) return;
   const w = document.getElementById('t-work'); if (w) w.textContent = mmss((Date.now() - wk.startTs) / 1000);
-  const r = document.getElementById('t-rest');
-  if (r && wk.restStart) { const left = wk.restDur - (Date.now() - wk.restStart) / 1000; r.textContent = left > 0 ? mmss(left) : 'GO'; if (left <= 0 && left > -1.1 && navigator.vibrate) navigator.vibrate([80, 60, 80]); }
 }, 1000);
 
 document.addEventListener('visibilitychange', () => { if (!document.hidden && cfg) { flushQueue(); refresh(true); } });
